@@ -44,6 +44,7 @@ enum class BatteryBarOrientation : uint8_t {
 struct BatteryIndicatorProps {
   uint8_t percent = 0; // 0..100
   bool charging = false;
+  bool showGlyph = true;
   BatteryIndicatorStyle style = BatteryIndicatorStyle::Icon;
   BatteryBarTrack barTrack = BatteryBarTrack::None;
   BatteryBarFill barFill = BatteryBarFill::Solid;
@@ -71,6 +72,10 @@ struct BatteryIndicatorProps {
 template <size_t MaxInteractions>
 void batteryIndicator(Frame<MaxInteractions>& frame, Rect rect,
                       const BatteryIndicatorProps& props) {
+  if (!props.showGlyph) {
+    if (props.label) frame.target().text(rect, props.label, props.text);
+    return;
+  }
   const bool isBar = props.style == BatteryIndicatorStyle::Bar;
   const int16_t minGlyphH = isBar ? 1 : 6;
   const int16_t minGlyphW = isBar ? 1 : 8;

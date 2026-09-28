@@ -121,10 +121,10 @@ void header(Frame<MaxInteractions>& frame, Rect rect, const HeaderProps& props) 
   const int16_t statusInset = status.edgeInset < 0 ? sidePad : status.edgeInset;
   int16_t batteryReserve = 0;
   if (status.showBattery) {
-    batteryReserve = static_cast<int16_t>(status.battery.glyphWidth + 2);
+    batteryReserve = status.battery.showGlyph ? static_cast<int16_t>(status.battery.glyphWidth + 2) : 0;
     if (status.battery.label) {
       batteryReserve = static_cast<int16_t>(
-          batteryReserve + status.battery.gap +
+          batteryReserve + (status.battery.showGlyph ? status.battery.gap : 0) +
           frame.target().measureText(status.battery.text.font, status.battery.label, status.battery.text).width);
     }
   }

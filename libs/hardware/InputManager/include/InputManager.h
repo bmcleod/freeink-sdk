@@ -50,7 +50,13 @@ class InputManager {
   // sleep-sliced idle loop) should re-poll quickly while this is set —
   // otherwise a press shorter than the poll period lands in a single sample and
   // is dropped.
-  bool isDebouncePending() const { return lastState != currentState; }
+  bool isDebouncePending() const {
+#if FREEINK_DEVICE_WUDADA
+    return wudadaRaw != wudadaStable;
+#else
+    return lastState != currentState;
+#endif
+  }
 
   // Duration between the first button press and final release.
   unsigned long getHeldTime() const;
@@ -271,6 +277,14 @@ class InputManager {
   void readButtonAdc(ButtonAdcSample& group1, ButtonAdcSample& group2);
 
  private:
+#if FREEINK_DEVICE_WUDADA
+  bool wudadaRaw = false;
+  bool wudadaStable = false;
+  bool wudadaHeld = false;
+  bool wudadaArmed = false;
+  unsigned long wudadaChangedAt = 0;
+  unsigned long wudadaPressedAt = 0;
+#endif
   static ButtonHook s_buttonHook;
 
   QueueHandle_t _asyncQueue = nullptr;

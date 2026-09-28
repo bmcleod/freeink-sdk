@@ -2342,6 +2342,48 @@ void testContentWidthTabBarLayout() {
   CHECK_EQ(interactions.route(tap).value, 20);
 }
 
+void testContentWidthTabBarFitsNarrowSettingsLabels() {
+  FakeDrawTarget draw;
+  DeviceContext device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<8> interactions;
+  Frame<8> frame(draw, device, input, interactions);
+
+  TabItem tabs[4];
+  const char* labels[] = {"Display", "Reader", "Controls", "System"};
+  for (int i = 0; i < 4; ++i) {
+    tabs[i].label = labels[i];
+    tabs[i].value = static_cast<int16_t>(i);
+    tabs[i].selected = i == 0;
+  }
+  TabBarProps bar;
+  bar.tabs = tabs;
+  bar.count = 4;
+  bar.action = 60;
+  bar.layout = TabBarLayout::ContentWidth;
+  bar.gap = 4;
+  bar.tabInset = Insets{2, 2, 4, 2};
+  bar.contentInset = Insets{2, 3, 2, 3};
+  tabBar(frame, Rect{0, 0, 224, 32}, bar);
+
+  CHECK_EQ(interactions.count(), 4u);
+  // Monospace: Display=42, Reader=36, Controls=48, System=36. Pills hug
+  // those widths plus 6px content padding, so Controls stays wider than
+  // System instead of sharing a 56px equal slot that clips it.
+  const FakeDrawTarget::Op* pills[4]{};
+  uint8_t pillCount = 0;
+  for (size_t i = 0; i < draw.opCount && pillCount < 4; ++i) {
+    if (draw.ops[i].kind == FakeDrawTarget::Op::Fill) pills[pillCount++] = &draw.ops[i];
+  }
+  CHECK_EQ(pillCount, 4);
+  CHECK(pills[0] && pills[2] && pills[3]);
+  if (pills[0] && pills[2] && pills[3]) {
+    CHECK(pills[2]->rect.width > pills[3]->rect.width);
+    CHECK(pills[2]->rect.width >= 48);
+    CHECK(pills[3]->rect.right() <= 224);
+    CHECK(pills[0]->rect.x >= 0);
+  }
+}
 
 void testTabBarTrailingIndicatorLayout() {
   FakeDrawTarget draw;
@@ -5311,6 +5353,7 @@ int main() {
   testCrossInkReadingStatsSurfaces();
   testInteractionOverflowFlag();
   testContentWidthTabBarLayout();
+  testContentWidthTabBarFitsNarrowSettingsLabels();
   testTabBarTrailingIndicatorLayout();
   testRoundedRaffSurfaces();
   testThemePrimitiveParity();

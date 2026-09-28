@@ -81,6 +81,8 @@ struct ListProps {
   TextStyle labelText{};
   TextStyle subtitleText{};
   TextStyle valueText{};
+  // Zero keeps the natural width. Narrow screens can reserve label space.
+  uint8_t maxValueWidthPercent = 0;
   StyleSet rowStyles{};
   // Screen::list() resolves rowHeight <= 0 from the label font, list padding
   // and device touch minimum; each row grows for its actual content. Positive
@@ -446,6 +448,10 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
     result.valueWidth = props.toggleWidth < 18 ? 18 : props.toggleWidth;
   } else if (item.value) {
     result.valueWidth = target.measureText(props.valueText.font, item.value, props.valueText).width;
+    if (props.maxValueWidthPercent > 0 && props.maxValueWidthPercent <= 100) {
+      const int16_t cap = static_cast<int16_t>((contentWidth > 0 ? contentWidth : 0) * props.maxValueWidthPercent / 100);
+      if (result.valueWidth > cap) result.valueWidth = cap;
+    }
   }
   if (item.toggle || item.value)
     result.labelWidth = static_cast<int16_t>(result.labelWidth - result.valueWidth -

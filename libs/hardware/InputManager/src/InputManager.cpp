@@ -1,6 +1,7 @@
 #include "InputManager.h"
 
 #include <algorithm>
+#include <cstring>
 
 #include "MultiTouchGestureMath.h"
 
@@ -164,10 +165,14 @@ uint8_t InputManager::getState() {
   if (BoardConfig::ACTIVE.inputStyle == BoardConfig::InputStyle::OnePageAdcLadder) {
     if (BoardConfig::ACTIVE.input.adcLadderPin >= 0) {
       const int mv = analogReadMilliVolts(BoardConfig::ACTIVE.input.adcLadderPin);
-      if (mv >= 2400 && mv <= 2800)      state |= (1 << BTN_BACK);    // ~2592 mV
-      else if (mv >= 1780 && mv <= 2140) state |= (1 << BTN_LEFT);    // ~1956 mV
-      else if (mv >= 1140 && mv <= 1500) state |= (1 << BTN_RIGHT);   // ~1316 mV
-      else if (mv >= 0 && mv <= 250)     state |= (1 << BTN_CONFIRM); // ~0 mV (ENTER)
+      if (mv >= 2400 && mv <= 2800)
+        state |= (1 << BTN_BACK);  // ~2592 mV
+      else if (mv >= 1780 && mv <= 2140)
+        state |= (1 << BTN_LEFT);  // ~1956 mV
+      else if (mv >= 1140 && mv <= 1500)
+        state |= (1 << BTN_RIGHT);  // ~1316 mV
+      else if (mv >= 0 && mv <= 250)
+        state |= (1 << BTN_CONFIRM);  // ~0 mV (ENTER)
     }
     if (BoardConfig::ACTIVE.input.up >= 0 && digitalRead(BoardConfig::ACTIVE.input.up) == LOW) {
       state |= (1 << BTN_UP);
@@ -528,6 +533,35 @@ void InputManager::update() {
   touchHomeKeyTapEvent = false;
   touchHomeKeyLongEvent = false;
 
+#if FREEINK_DEVICE_WUDADA
+  uint8_t pulse = serviceTouch();
+  const bool raw = isPowerButtonPhysicallyPressed();
+  // Ignore a held wake button until its first release.
+  if (!wudadaArmed) {
+    if (!raw) wudadaArmed = true;
+    applyStateChange(pulse, currentTime);
+    return;
+  }
+  if (raw != wudadaRaw) {
+    wudadaRaw = raw;
+    wudadaChangedAt = currentTime;
+  }
+  if (raw != wudadaStable && currentTime - wudadaChangedAt >= 20) {
+    wudadaStable = raw;
+    if (raw) {
+      wudadaPressedAt = currentTime;
+      wudadaHeld = false;
+    } else if (!wudadaHeld) {
+      pulse |= 1u << BTN_RIGHT;
+    }
+  }
+  if (wudadaStable && raw && !wudadaHeld && currentTime - wudadaPressedAt >= 650) {
+    wudadaHeld = true;
+    pulse |= 1u << BTN_CONFIRM;
+  }
+  applyStateChange(pulse, currentTime);
+  return;
+#endif
   if (BoardConfig::ACTIVE.inputStyle == BoardConfig::InputStyle::DigitalConfirmBackHold) {
     updateConfirmBackHold(currentTime);
     return;
@@ -574,6 +608,10 @@ bool InputManager::wasReleased(const uint8_t buttonIndex) const { return release
 bool InputManager::wasAnyReleased() const { return releasedEvents > 0; }
 
 unsigned long InputManager::getHeldTime() const {
+#if FREEINK_DEVICE_WUDADA
+  // Click/hold classification already happened; both outputs are logical clicks.
+  return 0;
+#endif
   // Still hold a button
   if (currentState > 0) {
     return millis() - buttonPressStart;
@@ -1225,7 +1263,8 @@ void InputManager::beginTouch() {
     beginGt911();
     return;
   }
-  if (t.controller == BoardConfig::TouchController::Ft5x06) {
+  if (t.controller == BoardConfig::TouchController::Ft5x06 ||
+      t.controller == BoardConfig::TouchController::WudadaTouch) {
     beginFt5x06();
     return;
   }
@@ -1268,7 +1307,8 @@ uint8_t InputManager::serviceTouch() {
 
   if (t.controller == BoardConfig::TouchController::Gt911) {
     pollGt911(now);
-  } else if (t.controller == BoardConfig::TouchController::Ft5x06) {
+  } else if (t.controller == BoardConfig::TouchController::Ft5x06 ||
+             t.controller == BoardConfig::TouchController::WudadaTouch) {
     pollFt5x06(now);
   } else if (t.controller == BoardConfig::TouchController::Ft6336u) {
     pollFt6336u(now);
@@ -1429,6 +1469,23 @@ void InputManager::beginFt5x06() {
   freeink::papermono::enableTouch();
 #endif
 
+  if (t.controller == BoardConfig::TouchController::WudadaTouch) {
+    // OEM 0x4204cd44: GPIO42 HIGH, I2C13/12 at 100kHz, bare IRQ input.
+    // Probe using the same register-0 report read as stock; no FT ID/mode writes.
+    // PowerManager holds this shared rail LOW during deep sleep. Release it
+    // before probing touch; the later SD mount would otherwise be too late.
+    gpio_hold_dis(static_cast<gpio_num_t>(t.powerEnable));
+    pinMode(t.powerEnable, OUTPUT);
+    digitalWrite(t.powerEnable, HIGH);
+    delay(50);
+    Wire.begin(t.sda, t.scl, 100000);
+    Wire.setTimeOut(10);
+    if (t.irq >= 0) pinMode(t.irq, INPUT);
+    uint8_t report[21] = {};
+    touchDataEnabled = ft5x06ReadReg(0x00, report, sizeof(report));
+    return;
+  }
+
   // The bus is shared with M5PM1/M5IOE1/RX8130, whose standing profile is
   // 100 kHz. FT6336 accepts that rate even though M5GFX uses 400 kHz for its
   // controller-specific transactions.
@@ -1494,7 +1551,8 @@ void InputManager::pollFt5x06(const unsigned long now) {
   // level must not be treated as a release (that splits one swipe into a
   // phantom tap plus a swipe). Idle fast-path gate only; while a contact is
   // live, the TD_STATUS zero-contact frame below is the release authority.
-  const bool irqDown = t.irq < 0 || digitalRead(t.irq) == LOW;
+  const bool irqDown =
+      t.controller == BoardConfig::TouchController::WudadaTouch || t.irq < 0 || digitalRead(t.irq) == LOW;
   if (!irqDown && !touchPressed) {
     return;
   }
@@ -1502,7 +1560,17 @@ void InputManager::pollFt5x06(const unsigned long now) {
   // Register 0x02 is TD_STATUS followed by the first point's XH/XL/YH/YL.
   // One contact is enough for the app's tap/swipe/drag gesture model.
   uint8_t data[5] = {};
-  if (!ft5x06ReadReg(0x02, data, sizeof(data))) {
+  bool readOk;
+  if (t.controller == BoardConfig::TouchController::WudadaTouch) {
+    // OEM 0x4204ccf0 / 0x4204cb94: 21 bytes from register 0, contact count
+    // at byte 2, X at 3/4 and Y at 5/6. Read the whole report to acknowledge it.
+    uint8_t report[21] = {};
+    readOk = ft5x06ReadReg(0x00, report, sizeof(report));
+    if (readOk) memcpy(data, report + 2, sizeof(data));
+  } else {
+    readOk = ft5x06ReadReg(0x02, data, sizeof(data));
+  }
+  if (!readOk) {
     // Transient read failures happen on the shared PY32 bus; survive them.
     // But a controller that has stopped answering (rail glitch) must not
     // leave the contact latched — release once samples go stale.
@@ -1606,7 +1674,8 @@ bool InputManager::gslUploadFirmware() {
       ok = gslWrite(0xF0, &page, 1) && ok;
     } else {
       const uint8_t val[4] = {static_cast<uint8_t>(e.value & 0xFF), static_cast<uint8_t>((e.value >> 8) & 0xFF),
-                              static_cast<uint8_t>((e.value >> 16) & 0xFF), static_cast<uint8_t>((e.value >> 24) & 0xFF)};
+                              static_cast<uint8_t>((e.value >> 16) & 0xFF),
+                              static_cast<uint8_t>((e.value >> 24) & 0xFF)};
       ok = gslWrite(e.reg, val, 4) && ok;
     }
   }

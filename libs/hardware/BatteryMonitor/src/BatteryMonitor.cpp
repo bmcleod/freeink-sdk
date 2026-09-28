@@ -360,9 +360,7 @@ namespace {
 // pull-up; an active-high STAT (X4 Pro GPIO21) is push-pull driven with no
 // pull — stock reads it bare, and a pull-up would fake "charging" if the
 // driver ever tri-states.
-int chargeActiveLevel() {
-  return BoardConfig::ACTIVE.batteryChargeStatusActiveHigh ? HIGH : LOW;
-}
+int chargeActiveLevel() { return BoardConfig::ACTIVE.batteryChargeStatusActiveHigh ? HIGH : LOW; }
 }  // namespace
 
 BatteryMonitor::BatteryMonitor(int8_t adcPin, float dividerMultiplier, int8_t chargeStatusPin)
@@ -372,9 +370,7 @@ BatteryMonitor::BatteryMonitor(int8_t adcPin, float dividerMultiplier, int8_t ch
   }
 }
 
-bool BatteryMonitor::hasAdcBackend() const {
-  return _adcPin >= 0;
-}
+bool BatteryMonitor::hasAdcBackend() const { return _adcPin >= 0; }
 
 bool BatteryMonitor::hasGaugeBackend() const {
 #if FREEINK_BATTERY_I2C_GAUGE
@@ -514,6 +510,11 @@ uint16_t BatteryMonitor::readMillivolts() const {
     mv = analogReadMilliVolts(_adcPin);
     digitalWrite(ce, activeHigh ? HIGH : LOW);  // resume charging
   } else {
+#if FREEINK_DEVICE_WUDADA
+    // OEM 0x42016524: ADC2_CH3 at 2.5 dB. analogSetPinAttenuation() errors until
+    // the pin is already analog; analogSetAttenuation() applies before first read.
+    analogSetAttenuation(ADC_2_5db);
+#endif
     mv = analogReadMilliVolts(_adcPin);
   }
 #endif
@@ -521,9 +522,7 @@ uint16_t BatteryMonitor::readMillivolts() const {
   return static_cast<uint16_t>(mv * _dividerMultiplier);
 }
 
-double BatteryMonitor::readVolts() const {
-  return static_cast<double>(readMillivolts()) / 1000.0;
-}
+double BatteryMonitor::readVolts() const { return static_cast<double>(readMillivolts()) / 1000.0; }
 
 bool BatteryMonitor::isCharging() const {
 #if FREEINK_BATTERY_I2C_GAUGE
@@ -638,8 +637,13 @@ constexpr uint16_t LIION_NOTCH_MV[11] = {
     3870,  //  60%
     3920,  //  70%
     3980,  //  80%
+#if FREEINK_DEVICE_WUDADA
+    4080,  //  90% — owner full-charge samples sat 4136-4192 mV
+    4150,  // 100%
+#else
     4060,  //  90%
     4200,  // 100%
+#endif
 };
 
 // A notch change has to clear the boundary by this much before it is accepted.

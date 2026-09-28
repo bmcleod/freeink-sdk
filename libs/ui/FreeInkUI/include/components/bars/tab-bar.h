@@ -132,13 +132,20 @@ void tabBar(Frame<MaxInteractions>& frame, Rect rect, const TabBarProps& props) 
     if (pillW < minPillWidth) pillW = minPillWidth;
     return static_cast<int16_t>(pillW + props.tabInset.left + props.tabInset.right);
   };
-  int32_t naturalWidth = leadingInset + static_cast<int32_t>(gap) * (props.count - 1);
+  int16_t usedGap = gap;
+  int32_t naturalWidth = leadingInset + static_cast<int32_t>(usedGap) * (props.count - 1);
   if (contentWidthLayout) {
     for (uint8_t i = 0; i < props.count; ++i) {
       naturalWidth += contentSlotWidth(props.tabs[i]);
     }
-    // A content-width bar must stay inside its parent. Equal-width slots are
-    // the safe fallback for long labels or narrow screens.
+    // Prefer packed labels over equal-width clipping: drop the gap first so
+    // a long tab like "Controls" can keep its natural width on a 240px panel.
+    if (naturalWidth > rect.width && usedGap > 0) {
+      naturalWidth -= static_cast<int32_t>(usedGap) * (props.count - 1);
+      usedGap = 0;
+    }
+    // Equal-width slots are the last-resort fallback for labels that still
+    // cannot fit inside the parent.
     if (naturalWidth > rect.width) contentWidthLayout = false;
   }
   bool distribute = props.layout == TabBarLayout::SpaceBetween;
@@ -153,10 +160,15 @@ void tabBar(Frame<MaxInteractions>& frame, Rect rect, const TabBarProps& props) 
     if (distributedWidth <= 0 || static_cast<int32_t>(distributedWidth) * props.count +
                                     static_cast<int32_t>(gap) * (props.count - 1) > rect.width) distribute = false;
   }
-  const int16_t slotGap = !contentWidthLayout && props.layout == TabBarLayout::ContentWidth ? 0 : gap;
+  const int16_t slotGap =
+      contentWidthLayout ? usedGap : (props.layout == TabBarLayout::ContentWidth ? 0 : gap);
   const int16_t equalSlotW =
       static_cast<int16_t>((rect.width - static_cast<int32_t>(slotGap) * (props.count - 1)) / props.count);
-  int16_t nextSlotX = static_cast<int16_t>(rect.x + (contentWidthLayout ? leadingInset : 0));
+  int16_t contentLeading = leadingInset;
+  if (contentWidthLayout && leadingInset == 0 && naturalWidth < rect.width) {
+    contentLeading = static_cast<int16_t>((rect.width - naturalWidth) / 2);
+  }
+  int16_t nextSlotX = static_cast<int16_t>(rect.x + (contentWidthLayout ? contentLeading : 0));
   for (uint8_t i = 0; i < props.count; ++i) {
     const TabItem& tab = props.tabs[i];
     const int16_t slotW = distribute ? distributedWidth : (contentWidthLayout ? contentSlotWidth(tab) : equalSlotW);
